@@ -1,4 +1,4 @@
-package com.sparta.preonboarding.user;
+package com.sparta.preonboarding.dto;
 
 
 import lombok.AllArgsConstructor;

@@ -5,6 +5,7 @@ import com.sparta.preonboarding.jwt.JwtAuthenticationFilter;
 import com.sparta.preonboarding.jwt.JwtAuthorizationFilter;
 import com.sparta.preonboarding.jwt.JwtProvider;
 import com.sparta.preonboarding.security.UserDetailsServiceImpl;
+import com.sparta.preonboarding.repository.RefreshTokenRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.security.reactive.PathRequest;
 import org.springframework.context.annotation.Bean;
@@ -28,6 +29,7 @@ public class WebSecurityConfig {
   private final JwtProvider jwtProvider;
   private final UserDetailsServiceImpl userDetailsService;
   private final AuthenticationConfiguration authenticationConfiguration;
+  private final RefreshTokenRepository refreshTokenRepository;
 
   @Bean
   public PasswordEncoder passwordEncoder() {
@@ -42,7 +44,7 @@ public class WebSecurityConfig {
 
   @Bean
   public JwtAuthenticationFilter jwtAuthenticationFilter() throws Exception {
-    JwtAuthenticationFilter filter = new JwtAuthenticationFilter(jwtProvider);
+    JwtAuthenticationFilter filter = new JwtAuthenticationFilter(jwtProvider, refreshTokenRepository);
     filter.setAuthenticationManager(authenticationManager(authenticationConfiguration));
     return filter;
   }
@@ -65,7 +67,7 @@ public class WebSecurityConfig {
     http.authorizeHttpRequests((authorizeHttpRequests) ->
         authorizeHttpRequests
             .requestMatchers(String.valueOf(PathRequest.toStaticResources().atCommonLocations())).permitAll() // resources 접근 허용 설정
-            .requestMatchers("/users/login", "/users", "/users/refresh", "/error").permitAll() // 메인 페이지 요청 허가
+            .requestMatchers("/users/login", "/users", "/users/reissue", "/error").permitAll() // 메인 페이지 요청 허가
             .requestMatchers(HttpMethod.GET).permitAll() // get요청  접근 허가
             .anyRequest().authenticated() // 그 외 모든 요청 인증처리
     );

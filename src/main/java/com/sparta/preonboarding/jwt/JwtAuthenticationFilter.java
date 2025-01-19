@@ -2,8 +2,10 @@ package com.sparta.preonboarding.jwt;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sparta.preonboarding.security.UserDetailsImpl;
-import com.sparta.preonboarding.user.LoginRequestDto;
-import com.sparta.preonboarding.user.UserRoleEnum;
+import com.sparta.preonboarding.dto.LoginRequestDto;
+import com.sparta.preonboarding.entity.RefreshToken;
+import com.sparta.preonboarding.entity.UserRoleEnum;
+import com.sparta.preonboarding.repository.RefreshTokenRepository;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -19,10 +21,12 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 public class JwtAuthenticationFilter extends UsernamePasswordAuthenticationFilter {
 
   private final JwtProvider jwtProvider;
+  private final RefreshTokenRepository refreshTokenRepository;
 
-  public JwtAuthenticationFilter(JwtProvider jwtProvider) {
+  public JwtAuthenticationFilter(JwtProvider jwtProvider, RefreshTokenRepository refreshTokenRepository) {
     this.jwtProvider = jwtProvider;
-    setFilterProcessesUrl("/users/login");
+      this.refreshTokenRepository = refreshTokenRepository;
+      setFilterProcessesUrl("/users/login");
   }
 
   @Override
@@ -58,6 +62,9 @@ public class JwtAuthenticationFilter extends UsernamePasswordAuthenticationFilte
 
     response.addHeader(JwtProvider.AUTHORIZATION_HEADER, accessToken);
     response.addHeader("RefreshToken", refreshToken);
+
+
+    refreshTokenRepository.save(new RefreshToken(username, refreshToken));
 
     // JSON 형식으로 로그인 성공 메시지 작성
     String loginSuccessMessage = String.format("{\"accessToken\" : \"%s\"}", accessToken);

@@ -1,7 +1,7 @@
 package com.sparta.preonboarding.security;
 
-import com.sparta.preonboarding.user.User;
-import com.sparta.preonboarding.user.UserRoleEnum;
+import com.sparta.preonboarding.entity.User;
+import com.sparta.preonboarding.entity.UserRoleEnum;
 import java.util.ArrayList;
 import java.util.Collection;
 import lombok.RequiredArgsConstructor;

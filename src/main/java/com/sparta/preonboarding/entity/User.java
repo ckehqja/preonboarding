@@ -1,4 +1,4 @@
-package com.sparta.preonboarding.user;
+package com.sparta.preonboarding.entity;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -9,11 +9,12 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 @Getter
-@Entity
 @NoArgsConstructor
+@Entity(name = "users")
 public class User {
 
-  @Id @GeneratedValue
+  @Id
+  @GeneratedValue
   private long id;
 
   private String username;

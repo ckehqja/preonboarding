@@ -1,7 +1,7 @@
 package com.sparta.preonboarding.security;
 
-import com.sparta.preonboarding.user.User;
-import com.sparta.preonboarding.user.UserRepository;
+import com.sparta.preonboarding.entity.User;
+import com.sparta.preonboarding.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;

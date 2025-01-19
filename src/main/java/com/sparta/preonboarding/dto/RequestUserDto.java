@@ -1,4 +1,4 @@
-package com.sparta.preonboarding.user;
+package com.sparta.preonboarding.dto;
 
 import jakarta.validation.constraints.NotBlank;
 import lombok.Getter;

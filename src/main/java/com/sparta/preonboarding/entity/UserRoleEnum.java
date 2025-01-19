@@ -1,4 +1,4 @@
-package com.sparta.preonboarding.user;
+package com.sparta.preonboarding.entity;
 
 
 import lombok.Getter;

@@ -1,5 +1,7 @@
-package com.sparta.preonboarding.user;
+package com.sparta.preonboarding.dto;
 
+import com.sparta.preonboarding.entity.User;
+import com.sparta.preonboarding.entity.UserRoleEnum;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 

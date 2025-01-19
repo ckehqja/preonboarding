@@ -1,6 +1,6 @@
 package com.sparta.preonboarding.jwt;
 
-import com.sparta.preonboarding.user.UserRoleEnum;
+import com.sparta.preonboarding.entity.UserRoleEnum;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.JwtBuilder;
@@ -28,6 +28,7 @@ public class JwtProvider {
   public static final String AUTHORIZATION_HEADER = "Authorization";
   // 사용자 권한 값의 KEY
   public static final String AUTHORIZATION_KEY = "auth";
+  public static final String RE_AUTHORIZATION_KEY = "re-auth";
   // Token 식별자
   public static final String BEARER_PREFIX = "Bearer ";
   // 토큰 만료시간
@@ -58,6 +59,25 @@ public class JwtProvider {
     return createToken(username, null, REFRESH_TOKEN_TIME);
   }
 
+//  public String createRefreshToken(String username){
+//    log.info("JwtToken create RefreshToken ==> refresh token 생성 시작");
+//    Claims claims = Jwts.claims().setSubject(username);
+////        claims.put("roles" ,roles);
+//
+//    Date now = new Date();
+//    String refreshToken = Jwts.builder()              //refresh 토큰에는 사용자 이름은 들어가지만 권한은 들어가지 않았음.
+//            .setClaims(claims)
+//            .setIssuedAt(now)
+//            .setExpiration(new Date(now.getTime() + REFRESH_TOKEN_TIME))
+//            .signWith(SignatureAlgorithm.HS256, secretKey)
+//            .compact();
+//
+//    log.info("JwtToken create refresh Token ==> refresh 토큰 생성 완료");
+//    return refreshToken;
+//    //DB에 실제로 refresh 토큰 저장해야함.
+//  }
+
+
   // 토큰 생성 (내부에서 사용)
   private String createToken(String username, UserRoleEnum role, long expireTime) {
     Date date = new Date();
@@ -69,7 +89,7 @@ public class JwtProvider {
 
     if (role != null) {
       builder.claim(AUTHORIZATION_KEY, role); // 사용자 권한
-    }
+    } else builder.claim(RE_AUTHORIZATION_KEY, null);
 
     return BEARER_PREFIX + builder.compact();
   }
@@ -101,7 +121,7 @@ public class JwtProvider {
 
 
   // 토큰에서 사용자 정보 가져오기
-  public Claims getUserInfoFromToken(String token) {
+    public Claims getUserInfoFromToken(String token) {
     return Jwts.parserBuilder().setSigningKey(key).build().parseClaimsJws(token).getBody();
   }
 }
