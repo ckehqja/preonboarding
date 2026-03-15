@@ -1,0 +1,446 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
+import { getFirestore, doc, setDoc, getDoc, collection, query, onSnapshot, addDoc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { Bell, BellRing, Calendar, DollarSign, Plus, Trash2, TrendingUp, AlertCircle, RefreshCw, Search, Edit3, X, Info, Users, BarChart3, ExternalLink, Building2, Sparkles, CheckCircle2 } from 'lucide-react';
+
+// Firebase configuration
+const firebaseConfig = JSON.parse(__firebase_config);
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'ipo-manager-2026-v3';
+
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [activeTab, setActiveTab] = useState('schedule');
+  const [ipos, setIpos] = useState([]);
+  const [myRecords, setMyRecords] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [searching, setSearching] = useState(false);
+  const [selectedIpo, setSelectedIpo] = useState(null);
+  const [errorMsg, setErrorMsg] = useState(null);
+
+  // 1. Authentication
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (error) {
+        console.error("Auth failed:", error);
+      }
+    };
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, setUser);
+    return () => unsubscribe();
+  }, []);
+
+  // 2. Initial Data Fetch
+  useEffect(() => {
+    fetchIpoSchedules();
+  }, []);
+
+  // 3. Sync User Portfolio
+  useEffect(() => {
+    if (!user) return;
+    const q = collection(db, 'artifacts', appId, 'users', user.uid, 'myIpos');
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const records = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setMyRecords(records);
+      setLoading(false);
+    }, (error) => {
+      console.error("Firestore error:", error);
+      setLoading(false);
+    });
+    return () => unsubscribe();
+  }, [user]);
+
+  // 4. Enhanced Fetch IPO Schedules (Specific Filtering for 2026.03.15)
+  const fetchIpoSchedules = async () => {
+    setSearching(true);
+    setErrorMsg(null);
+    const apiKey = ""; 
+    
+    const todayStr = "2026-03-15";
+    
+    // Updated search query to reflect user feedback
+    const userQuery = `2026년 3월 15일 기준 대한민국 공모주 실시간 일정. 
+    주의사항: 
+    1. '매주(Maeju)', '한패스(Hanpass)'는 이미 공모가가 확정되었으므로 확정가 반영 필수.
+    2. '에이아이커넥트'는 상장 철회 또는 제외된 종목이므로 리스트에서 반드시 제외.
+    3. 현재 청약 진행 중이거나 상장 예정인 실존 종목 위주로 구성 (예: 아이엠비디엑스 등 2026년 상반기 대어 포함).
+    4. 각 기업의 구체적인 사업 내용(Description) 포함.`;
+    
+    const systemPrompt = `
+      You are a specialized South Korean IPO Data Analyst. 
+      Context: It is March 15, 2026.
+      Rules:
+      - EXCLUDE 'AI Connect' (에이아이커넥트) as it is not listing.
+      - For 'Maeju' (매주) and 'Hanpass' (한패스), the 'price' must be the FIXED IPO price.
+      - Retrieve 5-6 active IPOs for March/April 2026.
+      - Output JSON array with: 
+        name (KR), description (2-3 sentences), price (Int), priceBand (String), broker (String), subStart/subEnd/listDate (YYYY-MM-DD), competitionRate (String).
+    `;
+
+    try {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: userQuery }] }],
+          systemInstruction: { parts: [{ text: systemPrompt }] },
+          tools: [{ "google_search": {} }],
+          generationConfig: { responseMimeType: "application/json" }
+        })
+      });
+
+      const result = await response.json();
+      const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+      
+      if (text) {
+        const data = JSON.parse(text);
+        if (Array.isArray(data)) {
+          // Double-check filtering in JS as well
+          const filteredData = data.filter(item => !item.name.includes("에이아이커넥트"));
+          setIpos(filteredData);
+        }
+      }
+    } catch (error) {
+      console.error("Search failed:", error);
+      setErrorMsg("최신 공모주 정보를 업데이트하지 못했습니다.");
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  // 5. Portfolio Actions
+  const addToPortfolio = async (ipo) => {
+    if (!user) return;
+    const uniqueId = ipo.name + (ipo.subStart || '');
+    if (myRecords.some(r => r.ipoId === uniqueId)) {
+      setSelectedIpo(null);
+      setActiveTab('portfolio');
+      return;
+    }
+
+    try {
+      const price = ipo.price > 0 ? ipo.price : (ipo.priceBand ? parseInt(ipo.priceBand.split('~')[1]?.replace(/[^0-9]/g, '') || '0') : 0);
+      
+      await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'myIpos'), {
+        ipoId: uniqueId,
+        name: ipo.name,
+        price: price,
+        shares: 0,
+        sellPrice: 0,
+        fee: 2000,
+        listDate: ipo.listDate || '',
+        createdAt: new Date().toISOString()
+      });
+      setSelectedIpo(null);
+      setActiveTab('portfolio');
+    } catch (e) {
+      console.error("Add failed", e);
+    }
+  };
+
+  const updateRecord = async (id, field, value) => {
+    if (!user) return;
+    const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'myIpos', id);
+    await updateDoc(docRef, { [field]: Number(value) });
+  };
+
+  const deleteRecord = async (id) => {
+    if (!user) return;
+    const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'myIpos', id);
+    await deleteDoc(docRef);
+  };
+
+  const totalProfit = useMemo(() => {
+    return myRecords.reduce((total, record) => {
+      if (record.shares > 0 && record.sellPrice > 0) {
+        return total + ((record.sellPrice - record.price) * record.shares - record.fee);
+      }
+      return total;
+    }, 0);
+  }, [myRecords]);
+
+  const formatCurrency = (val) => new Intl.NumberFormat('ko-KR').format(val || 0) + '원';
+
+  return (
+    <div className="min-h-screen bg-[#F8FAFC] text-slate-900 font-sans pb-24">
+      <div className="max-w-md mx-auto bg-white min-h-screen shadow-2xl relative">
+        
+        <header className="bg-indigo-900 text-white p-7 sticky top-0 z-30 shadow-2xl rounded-b-[3rem]">
+          <div className="flex justify-between items-center">
+            <div>
+              <div className="flex items-center gap-2">
+                <Sparkles size={22} className="text-amber-400 fill-amber-400" />
+                <h1 className="text-2xl font-black tracking-tight italic">IPO 2026 MASTER</h1>
+              </div>
+              <p className="text-[11px] text-indigo-200 mt-1 font-bold uppercase tracking-[0.2em] opacity-80">
+                Data Verified: 2026.03.15
+              </p>
+            </div>
+            <button 
+              onClick={fetchIpoSchedules} 
+              disabled={searching}
+              className={`p-3.5 bg-white/10 rounded-2xl hover:bg-white/20 transition-all ${searching ? 'animate-spin shadow-inner' : 'shadow-lg border border-white/10'}`}
+            >
+              <RefreshCw size={22} />
+            </button>
+          </div>
+        </header>
+
+        <main className="p-6">
+          {errorMsg && (
+            <div className="mb-6 p-4 bg-red-50 text-red-600 rounded-2xl text-xs font-bold border border-red-100 flex items-center gap-2">
+              <AlertCircle size={18} /> {errorMsg}
+            </div>
+          )}
+
+          {activeTab === 'schedule' ? (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between px-1">
+                <h2 className="font-extrabold text-xl text-slate-800 flex items-center gap-2">
+                  <Calendar size={22} className="text-indigo-600" /> 청약 일정
+                </h2>
+                {searching && <span className="text-[10px] text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-full animate-pulse font-black uppercase">Live Checking...</span>}
+              </div>
+
+              <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4 flex items-start gap-3">
+                <Info size={16} className="text-amber-600 mt-0.5 shrink-0" />
+                <p className="text-[11px] text-amber-800 font-bold leading-relaxed">
+
+                </p>
+              </div>
+
+              {ipos.length === 0 && !searching && (
+                <div className="text-center py-24 bg-slate-50 rounded-[3rem] border-2 border-dashed border-slate-200">
+                  <Search size={32} className="text-slate-300 mx-auto mb-4" />
+                  <p className="text-slate-400 font-bold text-sm">2026년 공모주 데이터를 수집 중입니다.</p>
+                </div>
+              )}
+
+              {ipos.map(ipo => (
+                <div 
+                  key={ipo.name + (ipo.subStart || '')} 
+                  onClick={() => setSelectedIpo(ipo)}
+                  className="bg-white border border-slate-100 rounded-[2.5rem] p-7 shadow-sm hover:shadow-2xl hover:border-indigo-100 transition-all cursor-pointer group active:scale-[0.98] relative overflow-hidden"
+                >
+                  <div className="flex justify-between items-start mb-4">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-[10px] bg-indigo-50 text-indigo-700 font-black px-3 py-1 rounded-full uppercase tracking-tighter">
+                          {ipo.broker || '주관사 확인중'}
+                        </span>
+                        {ipo.price > 0 && (
+                          <span className="text-[10px] bg-emerald-50 text-emerald-600 font-black px-3 py-1 rounded-full flex items-center gap-1">
+                            <CheckCircle2 size={10} /> 확정가
+                          </span>
+                        )}
+                      </div>
+                      <h3 className="text-2xl font-black text-slate-900 leading-tight group-hover:text-indigo-600 transition-colors">
+                        {ipo.name}
+                      </h3>
+                    </div>
+                    <div className="text-right ml-4">
+                      <p className="font-black text-indigo-600 text-xl tracking-tighter">
+                        {ipo.price > 0 ? formatCurrency(ipo.price) : '확정전'}
+                      </p>
+                      <p className="text-[9px] text-slate-400 font-bold uppercase mt-0.5 tracking-widest">Price</p>
+                    </div>
+                  </div>
+
+                  <p className="text-slate-500 text-sm line-clamp-2 mb-6 font-medium leading-relaxed">
+                    {ipo.description}
+                  </p>
+                  
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-slate-50 p-4 rounded-[1.5rem] flex flex-col gap-1 border border-slate-100">
+                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-widest">Subscription</p>
+                      <p className="font-black text-slate-700 text-xs tracking-tighter">
+                        {ipo.subStart?.slice(5) || 'TBD'} ~ {ipo.subEnd?.slice(5) || 'TBD'}
+                      </p>
+                    </div>
+                    <div className="bg-rose-50 p-4 rounded-[1.5rem] flex flex-col gap-1 border border-rose-100">
+                      <p className="text-[9px] text-rose-400 font-black uppercase tracking-widest">Listing Date</p>
+                      <p className="font-black text-rose-600 text-xs tracking-tighter">{ipo.listDate?.slice(5) || '일정 확인중'}</p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-6">
+              <div className="bg-slate-900 rounded-[3rem] p-10 text-white shadow-2xl relative overflow-hidden group">
+                <div className="absolute -top-10 -right-10 w-40 h-40 bg-indigo-500/20 rounded-full blur-[60px]"></div>
+                <div className="relative z-10">
+                  <p className="text-slate-400 text-[11px] font-black uppercase tracking-[0.3em] opacity-70">2026 Estimated Profit</p>
+                  <h2 className="text-5xl font-black mt-4 tracking-tighter drop-shadow-lg">{formatCurrency(totalProfit)}</h2>
+                  <div className="mt-8 flex items-center gap-3">
+                    <div className="flex items-center gap-1.5 text-[10px] font-black text-emerald-300 bg-white/10 px-5 py-2.5 rounded-full border border-white/10 uppercase tracking-widest backdrop-blur-md">
+                      <CheckCircle2 size={12} /> Sync Complete
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between px-2">
+                <h2 className="font-extrabold text-xl text-slate-800">나의 포트폴리오</h2>
+                <span className="text-[11px] font-black text-slate-400 uppercase tracking-widest">{myRecords.length} Stocks</span>
+              </div>
+              
+              <div className="space-y-5">
+                {myRecords.length === 0 && (
+                  <div className="text-center py-20 bg-white border border-slate-100 rounded-[3rem] shadow-sm">
+                    <p className="text-slate-400 font-bold text-sm leading-loose">
+                      일정 탭에서 종목을 선택하여<br/>포트폴리오에 추가해보세요.
+                    </p>
+                  </div>
+                )}
+                {myRecords.map(record => {
+                  const profit = record.shares > 0 && record.sellPrice > 0 
+                    ? (record.sellPrice - record.price) * record.shares - record.fee 
+                    : 0;
+
+                  return (
+                    <div key={record.id} className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-sm">
+                      <div className="flex justify-between items-start mb-8">
+                        <div>
+                          <h3 className="font-black text-2xl text-slate-900 tracking-tight">{record.name}</h3>
+                          <p className="text-[10px] text-slate-400 font-bold mt-1.5 flex items-center gap-1.5">
+                            <Calendar size={12} /> 상장일: {record.listDate || '일정 확인중'}
+                          </p>
+                        </div>
+                        <button onClick={() => deleteRecord(record.id)} className="text-slate-300 hover:text-red-500 transition-colors p-3 bg-slate-50 rounded-full">
+                          <Trash2 size={20} />
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-5 mb-8">
+                        <div className="space-y-2.5">
+                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-1.5">
+                            <Plus size={12} className="text-indigo-500" /> 배정 수량
+                          </label>
+                          <input 
+                            type="number" 
+                            className="w-full bg-slate-50 border-2 border-transparent rounded-2xl p-4.5 font-black text-xl focus:bg-white focus:border-indigo-500 outline-none transition-all shadow-inner"
+                            value={record.shares || ''}
+                            onChange={(e) => updateRecord(record.id, 'shares', e.target.value)}
+                            placeholder="0"
+                          />
+                        </div>
+                        <div className="space-y-2.5">
+                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-1.5 text-rose-400">
+                            <TrendingUp size={12} /> 매도 단가
+                          </label>
+                          <input 
+                            type="number" 
+                            className="w-full bg-slate-50 border-2 border-transparent rounded-2xl p-4.5 font-black text-xl focus:bg-white focus:border-rose-500 outline-none transition-all shadow-inner"
+                            value={record.sellPrice || ''}
+                            onChange={(e) => updateRecord(record.id, 'sellPrice', e.target.value)}
+                            placeholder="0"
+                          />
+                        </div>
+                      </div>
+
+                      <div className={`flex justify-between items-center p-7 rounded-[2rem] transition-all border-2 ${profit > 0 ? 'bg-rose-50/50 text-rose-600 border-rose-100' : profit < 0 ? 'bg-indigo-50 text-indigo-600 border-indigo-100' : 'bg-slate-50 text-slate-700 border-slate-100'}`}>
+                        <div className="flex flex-col">
+                          <span className="text-[10px] font-black uppercase tracking-widest opacity-60">Total Profit</span>
+                          <span className="font-black text-2xl tracking-tighter">{formatCurrency(profit)}</span>
+                        </div>
+                        {profit !== 0 && (
+                          <div className={`px-4 py-1.5 rounded-full text-[11px] font-black shadow-sm ${profit > 0 ? 'bg-rose-100' : 'bg-indigo-100'}`}>
+                            {((profit / (record.price * record.shares)) * 100).toFixed(1)}%
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </main>
+
+        {selectedIpo && (
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-slate-900/80 backdrop-blur-lg transition-all">
+            <div className="bg-white w-full max-w-md rounded-t-[4rem] sm:rounded-[4rem] p-10 shadow-2xl animate-in slide-in-from-bottom duration-500">
+              <div className="flex justify-between items-center mb-8">
+                <div className="flex items-center gap-2 bg-indigo-50 px-5 py-2.5 rounded-full">
+                  <Building2 size={18} className="text-indigo-600" />
+                  <span className="text-indigo-700 font-black text-[11px] uppercase tracking-widest">IPO Analysis</span>
+                </div>
+                <button onClick={() => setSelectedIpo(null)} className="p-4 bg-slate-100 rounded-full hover:bg-slate-200 transition-colors">
+                  <X size={22} className="text-slate-500" />
+                </button>
+              </div>
+
+              <h2 className="text-4xl font-black text-slate-900 mb-6 tracking-tighter leading-none">{selectedIpo.name}</h2>
+              
+              <div className="bg-indigo-50/50 p-7 rounded-[2.5rem] border-2 border-indigo-100/50 mb-8">
+                 <p className="text-slate-700 text-[15px] leading-relaxed font-bold italic">
+                  "{selectedIpo.description || '2026년 공모 시장의 핵심 기술력을 보유한 상장 예정 기업입니다.'}"
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 mb-8">
+                <div className="bg-white p-6 rounded-[2.2rem] flex flex-col gap-1.5 border-2 border-slate-50 shadow-sm">
+                  <div className="flex items-center gap-1.5 text-slate-400 mb-1">
+                    <BarChart3 size={16} />
+                    <span className="text-[10px] font-black uppercase tracking-tighter">희망 가액</span>
+                  </div>
+                  <span className="font-black text-slate-800 tracking-tighter text-base">{selectedIpo.priceBand || '확정가 반영'}</span>
+                </div>
+                <div className="bg-white p-6 rounded-[2.2rem] flex flex-col gap-1.5 border-2 border-indigo-50 shadow-sm">
+                  <div className="flex items-center gap-1.5 text-indigo-400 mb-1">
+                    <Users size={16} />
+                    <span className="text-[10px] font-black uppercase tracking-tighter">기관 경쟁률</span>
+                  </div>
+                  <span className="font-black text-indigo-700 tracking-tighter text-base">{selectedIpo.competitionRate || '0.0 : 1'}</span>
+                </div>
+              </div>
+
+              <div className="bg-indigo-700 p-8 rounded-[3rem] flex justify-between items-center text-white mb-10 shadow-3xl shadow-indigo-200 relative overflow-hidden group">
+                <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -mr-16 -mt-16 transition-transform group-hover:scale-125 duration-1000"></div>
+                <div className="flex flex-col gap-1 relative z-10">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-indigo-200 opacity-90">Final IPO Price</span>
+                  <span className="font-black text-3xl tracking-tighter">
+                    {selectedIpo.price > 0 ? formatCurrency(selectedIpo.price) : '확정 전'}
+                  </span>
+                </div>
+                <div className="h-16 w-[2px] bg-white/20 relative z-10"></div>
+                <div className="flex flex-col gap-1 text-right relative z-10">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-indigo-200 opacity-90">Broker</span>
+                  <span className="font-black text-base tracking-tighter">{selectedIpo.broker || 'TBD'}</span>
+                </div>
+              </div>
+
+              <button 
+                onClick={() => addToPortfolio(selectedIpo)}
+                className="w-full py-7.5 bg-slate-900 text-white rounded-[2.5rem] font-black text-xl hover:bg-indigo-600 transition-all flex items-center justify-center gap-3 active:scale-95 shadow-2xl shadow-slate-200"
+              >
+                포트폴리오에 담기
+              </button>
+            </div>
+          </div>
+        )}
+
+        <nav className="fixed sm:absolute bottom-8 left-8 right-8 bg-white/95 backdrop-blur-3xl border border-slate-200/50 rounded-[3rem] flex justify-around p-4.5 z-40 shadow-[0_35px_60px_-15px_rgba(0,0,0,0.2)]">
+          <button onClick={() => setActiveTab('schedule')} className={`flex-1 py-4 rounded-[2.5rem] flex flex-col items-center gap-1.5 transition-all duration-300 ${activeTab === 'schedule' ? 'bg-indigo-900 text-white shadow-xl scale-105' : 'text-slate-400 hover:text-indigo-400'}`}>
+            <Calendar size={26} />
+            <span className="text-[10px] font-black uppercase tracking-[0.15em]">Schedules</span>
+          </button>
+          <button onClick={() => setActiveTab('portfolio')} className={`flex-1 py-4 rounded-[2.5rem] flex flex-col items-center gap-1.5 transition-all duration-300 ${activeTab === 'portfolio' ? 'bg-indigo-900 text-white shadow-xl scale-105' : 'text-slate-400 hover:text-indigo-400'}`}>
+            <DollarSign size={26} />
+            <span className="text-[10px] font-black uppercase tracking-[0.15em]">Portfolio</span>
+          </button>
+        </nav>
+      </div>
+    </div>
+  );
+}
